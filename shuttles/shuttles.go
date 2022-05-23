@@ -36,7 +36,7 @@ func (s *Shuttle) InjectArguments(toinject []string) {
 	s.injargs = res
 }
 
-func (s *Shuttle) Launch() error {
+func (s *Shuttle) Launch() (*ShuttleOutput, error) {
 	ctx, cancel := context.WithCancel(s.ctx)
 	defer cancel()
 
@@ -52,9 +52,9 @@ func (s *Shuttle) Launch() error {
 
 	select {
 	case <-s.ctx.Done():
-		return cmd.Process.Kill()
+		return nil, cmd.Process.Kill()
 	case err := <-res:
 		s.output.Output = buff.String()
-		return err
+		return s.output, err
 	}
 }

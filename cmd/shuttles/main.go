@@ -1,12 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"flag"
 	"fmt"
 	"io/ioutil"
 	"os"
-	"strings"
 
 	"github.com/5amu/goutils/shuttles"
 )
@@ -27,17 +27,25 @@ func usage() {
 	fmt.Println("")
 }
 
-func loadFuel(f shuttles.ShuttleFactory, fname string, index int) error {
-	data, err := ioutil.ReadFile(fname)
+func loadFuel(f *shuttles.ShuttleFactory, fname string, index int) error {
+	file, err := os.Open(fname)
 	if err != nil {
 		return err
 	}
-	lines := strings.Split("\n", string(data))
-	for _, line := range lines {
-		if err := f.SupplyLane(line, index); err != nil {
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+
+	for scanner.Scan() {
+		if err := f.SupplyLane(scanner.Text(), index); err != nil {
 			return err
 		}
 	}
+
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+
 	f.Stop()
 	return nil
 }
@@ -46,6 +54,7 @@ func main() {
 	var lanes int
 	var fuel []string
 	var help bool
+	var out string
 
 	shuttleFlagSet := flag.NewFlagSet("shuttles", flag.ExitOnError)
 	shuttleFlagSet.IntVar(&lanes, "p", 2, "parallel processes to run")
@@ -53,6 +62,7 @@ func main() {
 		fuel = append(fuel, s)
 		return nil
 	})
+	shuttleFlagSet.StringVar(&out, "o", "", "file to write (json) results to")
 	shuttleFlagSet.BoolVar(&help, "h", false, "show help and exit")
 
 	if len(os.Args) < 2 {
@@ -74,16 +84,34 @@ func main() {
 		os.Exit(1)
 	}
 
-	factory := shuttles.NewShuttleFactory(strings.Join(shuttleFlagSet.Args(), " "), lanes)
+	factory := shuttles.NewShuttleFactory(shuttleFlagSet.Args(), lanes)
 	for index, fname := range fuel {
 		go func(n string, i int) {
-			if err := loadFuel(*factory, n, i); err != nil {
-				panic(err)
+			if err := loadFuel(factory, n, i); err != nil {
+				fmt.Println(err)
+				os.Exit(1)
 			}
 		}(fname, index)
 	}
 
 	if err := factory.Start(context.Background(), lanes); err != nil {
-		panic(err)
+		fmt.Println(err)
+		os.Exit(1)
+	}
+
+	outputs := factory.GetShuttleOutputs()
+	for _, v := range outputs {
+		fmt.Println("===== BEGIN OF SHUTTLE", v.ID, "OUTPUT =====")
+		fmt.Println("=====", v.Arguments, "===>", v.Injected, "=====")
+		fmt.Println(v.Output)
+		fmt.Println("===== END OF SHUTTLE", v.ID, "OUTPUT =====")
+		fmt.Println("")
+	}
+
+	if out != "" {
+		if err := ioutil.WriteFile(out, []byte(out), 0644); err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
 	}
 }
